@@ -1,16 +1,40 @@
 # Data Description
 
-Place raw HFT CSV files in `data/raw/`.
+This folder contains the datasets for High-Frequency Trading (HFT) project.
 
-## Required columns
-- Datetime (ISO format or pandas-parsable) — should be the first column and will be used as index.
-- Open
-- High
-- Low
-- Close
-- Volume
+## Folder Structure
+
+- `raw/`  
+  Contains raw input datasets in CSV format. Each CSV should include:
+  - Datetime (ISO format or pandas-parsable) as the index or first column
+  - Open, High, Low, Close prices
+  - Volume
+
+- `processed/`  
+  Contains cleaned and feature-engineered datasets. These datasets are derived from the raw data by applying preprocessing steps such as:
+  - Handling missing values
+  - Calculating technical indicators (e.g., MACD, RSI, Bollinger Bands)
+  - Label generation (e.g., buy/sell/hold signals)
+  - Normalization/scaling
+
+## CSV Requirements
+
+Each raw CSV file should have the following columns:
+
+| Column Name | Description                 |
+|-------------|-----------------------------|
+| Datetime    | Timestamp of the record     |
+| Open        | Opening price of the period |
+| High        | Highest price               |
+| Low         | Lowest price                |
+| Close       | Closing price              |
+| Volume      | Volume traded              |
+
+The processed CSV files will have additional columns for technical indicators and targets.
 
 ## Notes
-- Filenames placed in `data/raw/` should be named clearly, e.g., `AAPL_1m.csv`, `NIFTY_1m.csv`.
-- The preprocessing script `src.data_preprocessing` will read CSVs from `data/raw/`, compute technical indicators, create labels, and save processed CSVs into `data/processed/` with the naming convention: `<original_stem>_processed.csv`.
-- Ensure timestamps are sorted ascending and there are no duplicate indices.
+
+- Ensure that timestamps are sorted in ascending order.
+- Processed datasets should be saved in the `processed/` folder with the naming convention `<original_filename>_processed.csv`.
+- The preprocessing scripts are located in the `src/` directory.
+
