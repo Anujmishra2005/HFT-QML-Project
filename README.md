@@ -47,7 +47,6 @@ Welcome to the **HFT Quantum Machine Learning Project** – a groundbreaking ini
 
 In the rapidly evolving landscape of financial technology, traditional computing approaches are reaching their limitations. Our project addresses this challenge by:
 
-
 - **🔬 Pioneering Research**: First-of-its-kind implementation combining quantum machine learning with high-frequency trading strategies
 - **⚡ Quantum Advantage**: Exploiting quantum superposition and entanglement for enhanced pattern recognition in market data
 - **🎨 Hybrid Architecture**: Seamlessly integrating classical and quantum computing paradigms for optimal performance
@@ -1126,6 +1125,7 @@ If you use this project in academic research, please cite:
 **🌟 Join us in revolutionizing finance through quantum computing! 🌟**
 
 </div>
+
 
 
 
