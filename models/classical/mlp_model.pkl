@@ -1,0 +1,26 @@
+import joblib
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import accuracy_score
+import os
+
+MODEL_PATH = "models/classical/mlp_model.pkl"
+
+def train_mlp(X_train, y_train):
+    model = MLPClassifier(hidden_layer_sizes=(100,), max_iter=500, random_state=42)
+    model.fit(X_train, y_train)
+    os.makedirs("models/classical", exist_ok=True)
+    joblib.dump(model, MODEL_PATH)
+    print(f"MLP model saved at {MODEL_PATH}")
+    return model
+
+def load_mlp():
+    if not os.path.exists(MODEL_PATH):
+        raise FileNotFoundError(f"{MODEL_PATH} not found, train model first.")
+    model = joblib.load(MODEL_PATH)
+    return model
+
+def evaluate_mlp(model, X_test, y_test):
+    preds = model.predict(X_test)
+    acc = accuracy_score(y_test, preds)
+    print(f"MLP Accuracy: {acc:.4f}")
+    return acc

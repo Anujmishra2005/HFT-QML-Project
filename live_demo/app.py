@@ -94,7 +94,7 @@ def add_technical_indicators(df):
     rs = (gain / (loss.replace(0, np.nan))).replace([np.inf, -np.inf], np.nan).fillna(0)
     df["RSI"] = 100 - (100 / (1 + rs))
     df["ATR"] = ( (df["High"]-df["Low"]).abs()
-                .rolling(14).mean().bfill() )
+                .rolling(14).mean().fillna(method="bfill") )
     df["BB_MA"] = close.rolling(20).mean()
     bb_std = close.rolling(20).std()
     df["BB_UP"] = df["BB_MA"] + 2*bb_std
@@ -140,11 +140,7 @@ def feature_table(df, features):
 def try_load_model(path):
     p = Path(path)
     if p.exists():
-        try:
-            return joblib.load(p)
-        except Exception as e:
-            st.warning(f"Could not load model from {p.name}: {str(e)}")
-            return None
+        return joblib.load(p)
     return None
 
 def train_models(X, y, use_xgb=True):
