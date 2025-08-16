@@ -24,9 +24,13 @@ except Exception:
     XGB_OK = False
 
 APP_TITLE = "HFT · Quantum ML Studio"
-DATA_DIR = Path("data")
+# Get the project root directory (parent of live_demo)
+# Use absolute path resolution to handle Streamlit's working directory
+import os
+PROJECT_ROOT = Path(os.path.abspath(__file__)).parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
 PROC_DIR = DATA_DIR / "processed"
-MODELS_DIR = Path("models")
+MODELS_DIR = PROJECT_ROOT / "models"
 CLASSICAL_DIR = MODELS_DIR / "classical"
 QUANTUM_DIR = MODELS_DIR / "quantum"
 
