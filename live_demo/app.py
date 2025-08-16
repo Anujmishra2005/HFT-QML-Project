@@ -16,6 +16,10 @@ from sklearn.svm import SVC
 from sklearn.neural_network import MLPClassifier
 from sklearn.ensemble import RandomForestClassifier
 import joblib
+import yfinance as yf
+import time
+from datetime import datetime, timedelta
+import threading
 
 try:
     from xgboost import XGBClassifier
@@ -34,7 +38,15 @@ MODELS_DIR = PROJECT_ROOT / "models"
 CLASSICAL_DIR = MODELS_DIR / "classical"
 QUANTUM_DIR = MODELS_DIR / "quantum"
 
-st.set_page_config(page_title=APP_TITLE, page_icon="📊", layout="wide")
+st.set_page_config(page_title=APP_TITLE, page_icon="��", layout="wide")
+
+# Initialize session state for live data
+if 'last_refresh' not in st.session_state:
+    st.session_state.last_refresh = datetime.now()
+if 'prediction_history' not in st.session_state:
+    st.session_state.prediction_history = []
+if 'live_data_cache' not in st.session_state:
+    st.session_state.live_data_cache = {}
 
 st.markdown("""
 <style>
@@ -151,6 +163,45 @@ def try_load_model(path):
             return None
     return None
 
+def fetch_live_data(symbol, period="1d", interval="1m"):
+    """Fetch live data from yfinance"""
+    try:
+        ticker = yf.Ticker(symbol)
+        data = ticker.history(period=period, interval=interval)
+        if data.empty:
+            return None
+        return data
+    except Exception as e:
+        st.error(f"Error fetching data for {symbol}: {str(e)}")
+        return None
+
+def get_live_ticker_info(symbol):
+    """Get live ticker information"""
+    try:
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+        return {
+            'current_price': info.get('currentPrice', 0),
+            'previous_close': info.get('previousClose', 0),
+            'volume': info.get('volume', 0),
+            'market_cap': info.get('marketCap', 0),
+            'pe_ratio': info.get('trailingPE', 0),
+            'change': info.get('currentPrice', 0) - info.get('previousClose', 0),
+            'change_percent': ((info.get('currentPrice', 0) - info.get('previousClose', 0)) / info.get('previousClose', 0)) * 100 if info.get('previousClose', 0) else 0
+        }
+    except Exception as e:
+        return None
+
+def auto_refresh_data(symbol, interval_seconds=60):
+    """Auto-refresh data at specified interval"""
+    if 'last_refresh' not in st.session_state:
+        st.session_state.last_refresh = datetime.now()
+    
+    if (datetime.now() - st.session_state.last_refresh).seconds >= interval_seconds:
+        st.session_state.last_refresh = datetime.now()
+        return True
+    return False
+
 def train_models(X, y, use_xgb=True):
     models = {}
     models["SVM"] = SVC(probability=True, kernel="rbf", C=1.0, gamma="scale").fit(X, y)
@@ -192,13 +243,37 @@ def plot_confusion(y_true, y_pred, title):
 def sidebar():
     with st.sidebar:
         st.header("⚙️ Controls")
-        source = st.radio("Data Source", ["Upload CSV", "Use processed/ folder"], index=1)
+        
+        # Data source selection
+        source = st.radio("Data Source", ["Upload CSV", "Use processed/ folder", "Live YFinance"], index=1)
+        
+        # YFinance controls
+        if source == "Live YFinance":
+            st.subheader("📈 Live Data Settings")
+            symbol = st.text_input("Stock Symbol", value="AAPL", placeholder="e.g., AAPL, MSFT, GOOGL")
+            interval = st.selectbox("Data Interval", ["1m", "2m", "5m", "15m", "30m", "60m"], index=0)
+            period = st.selectbox("Data Period", ["1d", "5d", "1mo", "3mo", "6mo", "1y"], index=0)
+            auto_refresh = st.toggle("Auto-refresh", value=True)
+            refresh_interval = st.slider("Refresh interval (seconds)", 30, 300, 60, 30)
+            
+            if auto_refresh:
+                if st.button("🔄 Refresh Now"):
+                    st.session_state.last_refresh = datetime.now() - timedelta(seconds=refresh_interval + 1)
+                    st.rerun()
+        else:
+            symbol = "AAPL"
+            interval = "1m"
+            period = "1d"
+            auto_refresh = False
+            refresh_interval = 60
+        
+        st.markdown("---")
         horizon = st.slider("Label horizon (bars ahead)", 1, 30, 5, 1)
         thr = st.slider("Return threshold", -0.01, 0.01, 0.0, 0.001)
         scale = st.toggle("Standardize features", value=True)
         st.markdown("---")
         st.caption("Models will auto-load if .pkl files exist, else they will be trained quickly.")
-        return source, horizon, thr, scale
+        return source, horizon, thr, scale, symbol, interval, period, auto_refresh, refresh_interval
 
 def header():
     c1,c2,c3,c4 = st.columns([2,1,1,1])
@@ -207,7 +282,7 @@ def header():
     with c3: kpi_card("Indicators", "MACD/RSI/EMA")
     with c4: kpi_card("Status", "Ready")
 
-source, horizon, thr, do_scale = sidebar()
+source, horizon, thr, do_scale, symbol, interval, period, auto_refresh, refresh_interval = sidebar()
 header()
 
 tab1, tab2, tab3, tab4 = st.tabs(["📂 Data", "📈 Charts", "🤖 Models", "🔮 Live Predict"])
@@ -219,6 +294,38 @@ if source == "Upload CSV":
     uploaded = st.file_uploader("Upload market CSV with columns: Open, High, Low, Close (plus optional Volume/Date)", type=["csv"])
     if uploaded:
         df = read_csv_any(uploaded)
+elif source == "Live YFinance":
+    st.subheader(f"📈 Live Data: {symbol.upper()}")
+    
+    # Show live ticker info
+    ticker_info = get_live_ticker_info(symbol)
+    if ticker_info:
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Current Price", f"${ticker_info['current_price']:.2f}", 
+                     f"{ticker_info['change']:+.2f} ({ticker_info['change_percent']:+.2f}%)")
+        with col2:
+            st.metric("Volume", f"{ticker_info['volume']:,}")
+        with col3:
+            st.metric("Market Cap", f"${ticker_info['market_cap']/1e9:.1f}B" if ticker_info['market_cap'] else "N/A")
+        with col4:
+            st.metric("P/E Ratio", f"{ticker_info['pe_ratio']:.1f}" if ticker_info['pe_ratio'] else "N/A")
+    
+    # Fetch live data
+    if auto_refresh and auto_refresh_data(symbol, refresh_interval):
+        st.info(f"🔄 Auto-refreshing data for {symbol.upper()}...")
+    
+    live_data = fetch_live_data(symbol, period, interval)
+    if live_data is not None:
+        df = live_data
+        st.success(f"✅ Live data loaded: {len(df)} bars from {symbol.upper()}")
+        
+        # Show last update time
+        if 'last_refresh' in st.session_state:
+            st.caption(f"Last updated: {st.session_state.last_refresh.strftime('%H:%M:%S')}")
+    else:
+        st.error(f"❌ Failed to fetch data for {symbol.upper()}")
+        st.info("Please check the symbol and try again.")
 else:
     files = load_local_processed()
     if not files:
@@ -253,8 +360,32 @@ with tab1:
 
 with tab2:
     st.subheader("Price & Indicators")
+    
+    if source == "Live YFinance" and auto_refresh:
+        st.info(f"📊 Live chart updating every {refresh_interval} seconds for {symbol.upper()}")
+        if st.button("🔄 Update Chart Now"):
+            st.session_state.last_refresh = datetime.now() - timedelta(seconds=refresh_interval + 1)
+            st.rerun()
+    
     fig = candlestick_with_indicators(df)
     st.plotly_chart(fig, use_container_width=True)
+    
+    # Add live price line for yfinance data
+    if source == "Live YFinance" and ticker_info:
+        st.markdown("**💡 Live Price Indicator**")
+        live_price = ticker_info['current_price']
+        last_close = df['Close'].iloc[-1]
+        price_change = live_price - last_close
+        price_change_pct = (price_change / last_close) * 100
+        
+        price_col1, price_col2, price_col3 = st.columns(3)
+        with price_col1:
+            st.metric("Last Close", f"${last_close:.2f}")
+        with price_col2:
+            st.metric("Live Price", f"${live_price:.2f}", f"{price_change:+.2f}")
+        with price_col3:
+            st.metric("Change %", f"{price_change_pct:+.2f}%")
+    
     mcol1, mcol2 = st.columns(2)
     with mcol1:
         st.markdown("**MACD**")
@@ -338,13 +469,30 @@ with tab3:
         st.download_button("Download Model Bundle (.joblib)", buf.getvalue(), file_name="hft_models.joblib")
 
 with tab4:
-    st.subheader("Live Prediction")
-    row = df.iloc[-1][features].values.astype(float)
-    if scaler is not None:
-        row_s = scaler.transform([row])[0]
-    else:
-        row_s = row
-
+    st.subheader("🔮 Live Predictions")
+    
+    if source == "Live YFinance":
+        st.markdown("### 📊 Real-time Market Monitoring")
+        
+        # Live price ticker
+        if ticker_info:
+            price_col1, price_col2, price_col3 = st.columns(3)
+            with price_col1:
+                st.metric("Live Price", f"${ticker_info['current_price']:.2f}", 
+                         f"{ticker_info['change']:+.2f}")
+            with price_col2:
+                st.metric("Change %", f"{ticker_info['change_percent']:+.2f}%")
+            with price_col3:
+                st.metric("Volume", f"{ticker_info['volume']:,}")
+        
+        # Auto-refresh status
+        if auto_refresh:
+            st.info(f"🔄 Auto-refreshing every {refresh_interval} seconds")
+            if st.button("🔄 Manual Refresh", type="secondary"):
+                st.session_state.last_refresh = datetime.now() - timedelta(seconds=refresh_interval + 1)
+                st.rerun()
+    
+    # Model selection for predictions
     choice = st.selectbox("Select model for live prediction", ["Auto (best)","SVM","XGB","MLP","RF","VQC"])
     model_to_use = None
     if choice == "Auto (best)":
@@ -358,24 +506,111 @@ with tab4:
         if model_to_use is None:
             st.warning(f"{choice} model not available. Train or add a .pkl first.")
 
-    cA,cB,cC = st.columns(3)
-    with cA: kpi_card("RSI (last)", f"{df['RSI'].iloc[-1]:.2f}")
-    with cB: kpi_card("MACD (last)", f"{df['MACD'].iloc[-1]:.4f}")
-    with cC: kpi_card("RET (last)", f"{df['RET'].iloc[-1]:.4%}")
+    # Live indicators display
+    if df is not None and len(df) > 0:
+        cA, cB, cC = st.columns(3)
+        with cA: 
+            kpi_card("RSI (last)", f"{df['RSI'].iloc[-1]:.2f}")
+        with cB: 
+            kpi_card("MACD (last)", f"{df['MACD'].iloc[-1]:.4f}")
+        with cC: 
+            kpi_card("RET (last)", f"{df['RET'].iloc[-1]:.4%}")
+        
+        # Additional live metrics
+        if source == "Live YFinance":
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                kpi_card("ATR (last)", f"{df['ATR'].iloc[-1]:.4f}")
+            with col2:
+                kpi_card("BB Width", f"{(df['BB_UP'].iloc[-1] - df['BB_DN'].iloc[-1])/df['BB_MA'].iloc[-1]:.2%}")
+            with col3:
+                kpi_card("Momentum", f"{df['MOM_10'].iloc[-1]:.2%}")
 
-    if model_to_use is not None and st.button("Predict Next Move", type="primary"):
-        pred = int(model_to_use.predict([row_s])[0])
-        prob = None
-        try:
-            prob = float(model_to_use.predict_proba([row_s])[0, pred])
-        except Exception:
+    # Prediction section
+    if model_to_use is not None and df is not None and len(df) > 0:
+        st.markdown("### 🎯 Make Prediction")
+        
+        if st.button("🚀 Predict Next Move", type="primary"):
+            row = df.iloc[-1][features].values.astype(float)
+            if scaler is not None:
+                row_s = scaler.transform([row])[0]
+            else:
+                row_s = row
+
+            pred = int(model_to_use.predict([row_s])[0])
             prob = None
-        lbl = "Up" if pred==1 else "Down"
-        if prob is not None:
-            st.success(f"Prediction: **{lbl}**  ·  Confidence: **{prob:.2%}**")
-        else:
-            st.success(f"Prediction: **{lbl}**")
-        out = pd.DataFrame([dict(zip(features, row))])
-        out["prediction"] = lbl
-        st.dataframe(out, use_container_width=True)
-        st.download_button("Download Live Prediction Row", out.to_csv(index=False), "live_prediction.csv", "text/csv")
+            try:
+                prob = float(model_to_use.predict_proba([row_s])[0, pred])
+            except Exception:
+                prob = None
+            
+            lbl = "🟢 UP" if pred==1 else "🔴 DOWN"
+            confidence_color = "success" if prob and prob > 0.7 else "warning" if prob and prob > 0.5 else "info"
+            
+            if prob is not None:
+                st.success(f"**Prediction: {lbl}**  ·  **Confidence: {prob:.2%}**")
+                
+                # Confidence indicator
+                if prob > 0.8:
+                    st.info("🎯 High confidence prediction")
+                elif prob > 0.6:
+                    st.info("⚠️ Medium confidence prediction")
+                else:
+                    st.info("🤔 Low confidence prediction")
+            else:
+                st.success(f"**Prediction: {lbl}**")
+            
+            # Show prediction details
+            pred_col1, pred_col2 = st.columns(2)
+            with pred_col1:
+                st.markdown("**Latest Data Point:**")
+                out = pd.DataFrame([dict(zip(features, row))])
+                out["prediction"] = lbl
+                st.dataframe(out, use_container_width=True)
+            
+            with pred_col2:
+                st.markdown("**Market Context:**")
+                if source == "Live YFinance":
+                    context_data = {
+                        "Symbol": symbol.upper(),
+                        "Current Price": f"${ticker_info['current_price']:.2f}" if ticker_info else "N/A",
+                        "RSI": f"{df['RSI'].iloc[-1]:.2f}",
+                        "MACD": f"{df['MACD'].iloc[-1]:.4f}",
+                        "Volume": f"{ticker_info['volume']:,}" if ticker_info else "N/A",
+                        "Prediction Time": datetime.now().strftime("%H:%M:%S")
+                    }
+                    context_df = pd.DataFrame(list(context_data.items()), columns=["Metric", "Value"])
+                    st.dataframe(context_df, use_container_width=True)
+            
+            # Download prediction
+            st.download_button("📥 Download Live Prediction", out.to_csv(index=False), 
+                             f"live_prediction_{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", 
+                             "text/csv")
+            
+            # Prediction history (if available)
+            if 'prediction_history' not in st.session_state:
+                st.session_state.prediction_history = []
+            
+            prediction_record = {
+                'timestamp': datetime.now(),
+                'symbol': symbol if source == "Live YFinance" else "Unknown",
+                'prediction': lbl,
+                'confidence': prob,
+                'current_price': ticker_info['current_price'] if ticker_info else None,
+                'rsi': df['RSI'].iloc[-1] if 'RSI' in df.columns else None,
+                'macd': df['MACD'].iloc[-1] if 'MACD' in df.columns else None
+            }
+            st.session_state.prediction_history.append(prediction_record)
+            
+            # Show prediction history
+            if len(st.session_state.prediction_history) > 1:
+                st.markdown("### 📈 Prediction History")
+                history_df = pd.DataFrame(st.session_state.prediction_history)
+                st.dataframe(history_df, use_container_width=True)
+                
+                # Clear history button
+                if st.button("🗑️ Clear History"):
+                    st.session_state.prediction_history = []
+                    st.rerun()
+    else:
+        st.warning("Please load data and train models to make predictions.")

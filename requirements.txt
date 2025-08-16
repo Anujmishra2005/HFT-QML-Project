@@ -10,3 +10,4 @@ streamlit
 backtrader
 pennylane
 qiskit
+yfinance
