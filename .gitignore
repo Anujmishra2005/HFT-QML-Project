@@ -1,6 +1,5 @@
 # Virtual env
 venv/
-path/
 
 # Python cache
 __pycache__/
@@ -16,4 +15,3 @@ results/
 
 # Env files
 .env
-
