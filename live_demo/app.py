@@ -1,5 +1,4 @@
 import os
-import io
 import sys
 from pathlib import Path
 import numpy as np
@@ -56,10 +55,29 @@ QUANTUM_DIR = MODELS_DIR / "quantum"
 st.set_page_config(page_title=APP_TITLE, page_icon="📊", layout="wide")
 
 # CSS styling
-st.markdown("""<style> ... (your CSS styles here) ... </style>""", unsafe_allow_html=True)
+st.markdown("""
+<style>
+.metric-card {
+    background: #1e1e1e;
+    padding: 15px;
+    border-radius: 12px;
+    text-align: center;
+    margin: 5px;
+}
+.kpi {
+    font-size: 26px;
+    font-weight: bold;
+    color: #4CAF50;
+}
+.kpi-label {
+    font-size: 14px;
+    color: #cccccc;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────
-# FUNCTIONS (unchanged from your code)
+# FUNCTIONS
 # ───────────────────────────────────────────────
 def load_local_processed():
     if PROC_DIR.exists():
@@ -101,7 +119,8 @@ def add_technical_indicators(df):
     loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
     rs = (gain / (loss.replace(0, np.nan))).replace([np.inf, -np.inf], np.nan).fillna(0)
     df["RSI"] = 100 - (100 / (1 + rs))
-    df["ATR"] = ((df["High"]-df["Low"]).abs().rolling(14).mean().fillna(method="bfill"))
+    df["ATR"] = ( (df["High"]-df["Low"]).abs()
+                .rolling(14).mean().fillna(method="bfill") )
     df["BB_MA"] = close.rolling(20).mean()
     bb_std = close.rolling(20).std()
     df["BB_UP"] = df["BB_MA"] + 2*bb_std
@@ -136,16 +155,9 @@ def candlestick_with_indicators(df):
 
 def try_load_model(path):
     p = Path(path)
-    if not p.exists():
-        return None
-    try:
+    if p.exists():
         return joblib.load(p)
-    except ModuleNotFoundError as e:
-        st.warning(f"Corrupted pickle {p.name}, will retrain. ({e})")
-        return None
-    except Exception as e:
-        st.warning(f"Failed to load {p.name}: {e}")
-        return None
+    return None
 
 def train_models(X, y, use_xgb=True):
     models = {}
@@ -192,7 +204,7 @@ elif source == "Use processed/ folder":
         st.warning("No files in data/processed. Switching to yfinance...")
         df = fetch_yfinance_data("AAPL", period="5d", interval="1m")
         if df is not None:
-            save_processed_data(df, "AAPL_1min_processed.csv")
+            save_processed_data(df, "AAPL_1m_processed.csv")
     else:
         pick = st.selectbox("Choose processed dataset", [f.name for f in files])
         if pick:
@@ -208,7 +220,7 @@ elif source == "Fetch from yfinance":
             save_processed_data(df, f"{ticker}_{interval}_processed.csv")
 
 # ───────────────────────────────────────────────
-# REST OF YOUR ORIGINAL APP LOGIC (unchanged)
+# MAIN LOGIC
 # ───────────────────────────────────────────────
 if df is None:
     st.info("Load a dataset to continue.")
@@ -222,4 +234,36 @@ if missing:
     st.stop()
 
 df = add_technical_indicators(df)
-# ... continue with your charts, ML training, and tabs exactly as before ...
+
+# Candlestick chart
+st.subheader("📈 Market Data with Indicators")
+st.plotly_chart(candlestick_with_indicators(df), use_container_width=True)
+
+# Prepare ML data
+X = df.drop(columns=["RET","Close"])
+y = label_from_returns(df, horizon=horizon, threshold=thr)
+
+if do_scale:
+    scaler = StandardScaler()
+    X = scaler.fit_transform(X)
+else:
+    X = X.values
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, shuffle=False)
+
+# Train models
+st.subheader("🤖 Training Models")
+models = train_models(X_train, y_train)
+
+# Evaluate
+st.subheader("📊 Model Performance")
+for name, model in models.items():
+    y_pred = model.predict(X_test)
+    acc = accuracy_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
+    kpi_card(f"{name} Accuracy", f"{acc:.2f}")
+    kpi_card(f"{name} F1", f"{f1:.2f}")
+    st.text(f"{name} report:\n{classification_report(y_test, y_pred)}")
+    cm = confusion_matrix(y_test, y_pred)
+    fig = px.imshow(cm, text_auto=True, title=f"{name} Confusion Matrix")
+    st.plotly_chart(fig, use_container_width=True)
