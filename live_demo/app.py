@@ -20,6 +20,8 @@ import yfinance as yf
 import time
 from datetime import datetime, timedelta
 import threading
+from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix, precision_score, recall_score
+
 
 try:
     from xgboost import XGBClassifier
@@ -68,6 +70,7 @@ h1,h2,h3,h4 { letter-spacing:.2px; }
 hr { border-color: rgba(255,255,255,.1); }
 </style>
 """, unsafe_allow_html=True)
+
 
 def load_local_processed():
     if PROC_DIR.exists():
@@ -217,22 +220,38 @@ def train_models(X, y, use_xgb=True):
 def predictions_section(models, X_test, y_test, class_labels=("Down","Up")):
     cols = st.columns(len(models))
     scores = {}
+    unique_classes = np.unique(y_test)
+
     for i,(name,model) in enumerate(models.items()):
         y_pred = model.predict(X_test)
         acc = accuracy_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred)
+        f1 = f1_score(y_test, y_pred, zero_division=0)
         scores[name] = (acc,f1)
         with cols[i]:
             kpi_card(f"{name} · Accuracy", f"{acc:.3f}")
             kpi_card(f"{name} · F1-score", f"{f1:.3f}")
+
     st.markdown("#### Classification Reports")
     for name,model in models.items():
         y_pred = model.predict(X_test)
-        st.markdown(f"**{name}**")
-        st.code(classification_report(y_test, y_pred, target_names=class_labels))
+        try:
+            st.markdown(f"**{name}**")
+            # Build dynamic label names to avoid mismatch
+            labels = list(unique_classes)
+            names = [class_labels[i] for i in labels]
+            st.code(classification_report(
+                y_test, y_pred,
+                labels=labels,
+                target_names=names,
+                zero_division=0
+            ))
+        except Exception as e:
+            st.warning(f"Could not generate report for {name}: {e}")
+
     best = max(scores.items(), key=lambda kv: kv[1][0])[0]
     st.success(f"Best model by accuracy: **{best}**")
     return best
+
 
 def plot_confusion(y_true, y_pred, title):
     cm = confusion_matrix(y_true, y_pred)
@@ -285,7 +304,7 @@ def header():
 source, horizon, thr, do_scale, symbol, interval, period, auto_refresh, refresh_interval = sidebar()
 header()
 
-tab1, tab2, tab3, tab4 = st.tabs(["📂 Data", "📈 Charts", "🤖 Models", "🔮 Live Predict"])
+tab1, tab2, tab3, tab4,tab5 = st.tabs(["📂 Data", "📈 Charts", "🤖 Models", "🔮 Live Predict", "📊 Analysis"])
 
 df = None
 uploaded = None
@@ -348,6 +367,8 @@ if missing:
 
 df = add_technical_indicators(df)
 
+# Tab1 - Data
+
 with tab1:
     st.subheader("Dataset Preview")
     st.dataframe(df.tail(200), use_container_width=True, height=420)
@@ -357,6 +378,8 @@ with tab1:
         file_name="enriched_dataset.csv",
         mime="text/csv"
     )
+
+# Tab2 - Charts
 
 with tab2:
     st.subheader("Price & Indicators")
@@ -426,7 +449,7 @@ pretrained = {
     "RF":  try_load_model(CLASSICAL_DIR / "rf_model.pkl"),
     "VQC": try_load_model(QUANTUM_DIR / "vqc_model.pkl")
 }
-
+# Tab3 - Models
 with tab3:
     st.subheader("Model Training / Loading")
     use_pretrained = st.toggle("Prefer pre-trained models if available", value=True)
@@ -468,6 +491,7 @@ with tab3:
         joblib.dump(bundle, buf)
         st.download_button("Download Model Bundle (.joblib)", buf.getvalue(), file_name="hft_models.joblib")
 
+# Tab4 - Live Predict
 with tab4:
     st.subheader("🔮 Live Predictions")
     
@@ -614,3 +638,76 @@ with tab4:
                     st.rerun()
     else:
         st.warning("Please load data and train models to make predictions.")
+
+# Tab5 - Analysis
+
+with tab5:
+    st.subheader("📊 Model Performance Analysis")
+
+    if st.button("🔨 Train & Analyze Models", type="primary"):
+        # Train models fresh for analysis
+        models = train_models(X_train, y_train, use_xgb=True)
+
+        eval_results = {}
+        for name, model in models.items():
+            y_pred = model.predict(X_test)
+            eval_results[name] = {
+                "accuracy": accuracy_score(y_test, y_pred),
+                "precision": precision_score(y_test, y_pred, average="weighted", zero_division=0),
+                "recall": recall_score(y_test, y_pred, average="weighted", zero_division=0),
+                "f1": f1_score(y_test, y_pred, average="weighted", zero_division=0),
+            }
+
+        df_results = pd.DataFrame(eval_results).T
+
+        st.write("### Results Table")
+        st.dataframe(df_results.style.format("{:.3f}"))
+
+        # Performance comparison charts
+        st.write("### 📊 Accuracy Comparison")
+        fig_acc = px.bar(df_results, x=df_results.index, y="accuracy", text_auto=".3f",
+                         title="Model Accuracy", color=df_results.index)
+        st.plotly_chart(fig_acc, use_container_width=True)
+
+        st.write("### 📊 Performance Metrics Comparison")
+        fig_metrics = df_results[["precision", "recall", "f1"]].plot(kind="bar", figsize=(8,5), rot=0)
+        st.bar_chart(df_results[["precision", "recall", "f1"]])
+
+        # Confusion Matrices
+        st.write("### 🔍 Confusion Matrices")
+        for name, model in models.items():
+            y_pred = model.predict(X_test)
+            cm = confusion_matrix(y_test, y_pred)
+            fig_cm = px.imshow(cm, text_auto=True, aspect="auto",
+                               labels=dict(x="Predicted", y="True"),
+                               title=f"{name} · Confusion Matrix")
+            st.plotly_chart(fig_cm, use_container_width=True)
+
+        # Findings Section
+        best_model = df_results.sort_values("accuracy", ascending=False).index[0]
+        best_acc = df_results.loc[best_model, "accuracy"]
+        st.markdown(
+            f"""
+            ### Findings  
+            - The best performing model is **{best_model}** with accuracy **{best_acc:.3f}**.  
+            - Precision, Recall, and F1 are compared across all models.  
+            - Confusion matrices show classification errors per model.  
+            - These results can be directly used in your research paper/report.  
+            """
+        )
+        # ---------------------------
+        # 📥 Export Results Section
+        # ---------------------------
+        st.subheader("📥 Export Results")
+
+        # CSV export
+        csv_data = df_results.to_csv().encode("utf-8")
+        st.download_button(
+            label="Download Results as CSV",
+            data=csv_data,
+            file_name="model_performance_results.csv",
+            mime="text/csv",
+        )
+
+
+
