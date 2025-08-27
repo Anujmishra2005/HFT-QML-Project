@@ -28,7 +28,6 @@
 [🤝 Contributing](#-contributing)
 
 ---
-
 </div>
 
 ## 🌟 **Project Vision**
@@ -1125,4 +1124,5 @@ If you use this project in academic research, please cite:
 **🌟 Join us in revolutionizing finance through quantum computing! 🌟**
 
 </div>
+
 
