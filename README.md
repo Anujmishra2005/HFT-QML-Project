@@ -19,7 +19,6 @@
 
 *Bridging the gap between quantum computing and algorithmic trading through cutting-edge machine learning techniques*
 
-
 ![Quantum Circuit Visualization](https://via.placeholder.com/800x200/2a5298/ffffff?text=Quantum+Circuits+%7C+VQC+%7C+QNN+%7C+QSVM)
 
 [📚 Documentation](#-comprehensive-documentation) •
@@ -1126,6 +1125,7 @@ If you use this project in academic research, please cite:
 **🌟 Join us in revolutionizing finance through quantum computing! 🌟**
 
 </div>
+
 
 
 
