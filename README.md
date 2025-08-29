@@ -6,6 +6,7 @@
   <img src="banner.png" alt="HFT Quantum ML Banner" width="800" height="500">
 </p>
 
+
 # 🚀 High-Frequency Trading with Quantum Machine Learning
 ### *Revolutionizing Financial Markets Through Quantum Computing*
 
@@ -1125,6 +1126,7 @@ If you use this project in academic research, please cite:
 **🌟 Join us in revolutionizing finance through quantum computing! 🌟**
 
 </div>
+
 
 
 
